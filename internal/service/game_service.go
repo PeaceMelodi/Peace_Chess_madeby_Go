@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	chess "github.com/corentings/chess/v2"
 	"github.com/google/uuid"
@@ -90,8 +91,8 @@ func (s *GameService) GetGameForConnection(ctx context.Context, gameID string) (
 type MoveResult struct {
 	Game      *model.Game
 	GameOver  bool
-	Outcome   string 
-	Method    string 
+	Outcome   string
+	Method    string
 }
 
 func (s *GameService) MakeMove(ctx context.Context, gameID string, seat string, moveUCI string) (*MoveResult, error) {
@@ -145,4 +146,142 @@ func (s *GameService) MakeMove(ctx context.Context, gameID string, seat string, 
 	}
 
 	return result, nil
+}
+
+func (s *GameService) OfferDraw(ctx context.Context, gameID string, seat string) error {
+	game, err := s.repo.GetGameByID(ctx, gameID)
+	if err != nil {
+		return err
+	}
+	if game == nil {
+		return errors.New("game not found")
+	}
+	if game.Status != "ongoing" {
+		return errors.New("game is not in progress")
+	}
+	if game.DrawOfferedBy != nil && *game.DrawOfferedBy == seat {
+		return errors.New("draw already offered")
+	}
+	if game.DrawOfferedBy != nil && *game.DrawOfferedBy != seat && game.DrawExpiresAt != nil && time.Now().Before(*game.DrawExpiresAt) {
+		return errors.New("opponent has a pending draw offer")
+	}
+
+	expiresAt := time.Now().Add(5 * time.Second)
+	if err := s.repo.SetDrawOffer(ctx, gameID, seat, expiresAt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *GameService) AcceptDraw(ctx context.Context, gameID string, seat string) (*MoveResult, error) {
+	game, err := s.repo.GetGameByID(ctx, gameID)
+	if err != nil {
+		return nil, err
+	}
+	if game == nil {
+		return nil, errors.New("game not found")
+	}
+	if game.Status != "ongoing" {
+		return nil, errors.New("game is not in progress")
+	}
+	if game.DrawOfferedBy == nil {
+		return nil, errors.New("no draw offer to accept")
+	}
+	if *game.DrawOfferedBy == seat {
+		return nil, errors.New("cannot accept your own draw offer")
+	}
+	if game.DrawExpiresAt == nil || time.Now().After(*game.DrawExpiresAt) {
+		// Draw offer expired
+		if err := s.repo.ClearDrawOffer(ctx, gameID); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("draw offer has expired")
+	}
+
+	if err := s.repo.FinishDraw(ctx, gameID, game.BoardState, game.CurrentTurn); err != nil {
+		return nil, err
+	}
+
+	game.Status = "draw"
+	game.DrawOfferedBy = nil
+	game.DrawExpiresAt = nil
+
+	result := &MoveResult{
+		Game:     game,
+		GameOver: true,
+		Outcome:  "draw",
+		Method:   "agreement",
+	}
+	return result, nil
+}
+
+func (s *GameService) DeclineDraw(ctx context.Context, gameID string, seat string) error {
+	game, err := s.repo.GetGameByID(ctx, gameID)
+	if err != nil {
+		return err
+	}
+	if game == nil {
+		return errors.New("game not found")
+	}
+	if game.Status != "ongoing" {
+		return errors.New("game is not in progress")
+	}
+	if game.DrawOfferedBy == nil {
+		return errors.New("no draw offer to decline")
+	}
+	if *game.DrawOfferedBy == seat {
+		return errors.New("cannot decline your own draw offer")
+	}
+
+	if err := s.repo.ClearDrawOffer(ctx, gameID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *GameService) CheckDrawExpired(ctx context.Context, gameID string) (bool, error) {
+	game, err := s.repo.GetGameByID(ctx, gameID)
+	if err != nil {
+		return false, err
+	}
+	if game == nil {
+		return false, errors.New("game not found")
+	}
+	if game.DrawOfferedBy == nil {
+		return false, nil
+	}
+	if game.DrawExpiresAt != nil && time.Now().After(*game.DrawExpiresAt) {
+		if err := s.repo.ClearDrawOffer(ctx, gameID); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *GameService) CloseGame(ctx context.Context, gameID string, token string) error {
+	game, err := s.repo.GetGameByID(ctx, gameID)
+	if err != nil {
+		return err
+	}
+	if game == nil {
+		return errors.New("game not found")
+	}
+
+	// Verify creator token
+	var creatorToken string
+	if game.CreatorColor == "white" {
+		creatorToken = game.WhiteToken
+	} else {
+		creatorToken = game.BlackToken
+	}
+
+	if token != creatorToken {
+		return errors.New("only the game creator can close the game")
+	}
+
+	if err := s.repo.CloseGame(ctx, gameID); err != nil {
+		return err
+	}
+	return nil
 }

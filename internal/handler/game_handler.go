@@ -86,3 +86,63 @@ func (h *GameHandler) JoinGame(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
 }
+
+type getGameResponse struct {
+	GameID      string `json:"game_id"`
+	BoardState  string `json:"board_state"`
+	CurrentTurn string `json:"current_turn"`
+	Status      string `json:"status"`
+	WhiteToken  string `json:"white_token"`
+	BlackToken  string `json:"black_token"`
+	CreatorColor string `json:"creator_color"`
+}
+
+func (h *GameHandler) GetGame(w http.ResponseWriter, r *http.Request) {
+	gameID := r.PathValue("id")
+
+	game, err := h.service.GetGameForConnection(r.Context(), gameID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := getGameResponse{
+		GameID:       game.ID,
+		BoardState:   game.BoardState,
+		CurrentTurn:  game.CurrentTurn,
+		Status:       game.Status,
+		WhiteToken:   game.WhiteToken,
+		BlackToken:   game.BlackToken,
+		CreatorColor: game.CreatorColor,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
+}
+
+type closeGameRequest struct {
+	Token string `json:"token"`
+}
+
+func (h *GameHandler) CloseGame(w http.ResponseWriter, r *http.Request) {
+	gameID := r.PathValue("id")
+
+	var req closeGameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.CloseGame(r.Context(), gameID, req.Token); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "game closed successfully",
+		"status":  "closed",
+	})
+}

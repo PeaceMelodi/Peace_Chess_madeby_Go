@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"peacechess/internal/model"
@@ -66,5 +67,29 @@ func (r *GameRepository) UpdateBoard(ctx context.Context, id string, boardState 
 func (r *GameRepository) FinishGame(ctx context.Context, id string, boardState string, currentTurn string) error {
 	query := `UPDATE games SET board_state = $1, current_turn = $2, status = 'finished', updated_at = now() WHERE id = $3`
 	_, err := r.db.ExecContext(ctx, query, boardState, currentTurn, id)
+	return err
+}
+
+func (r *GameRepository) SetDrawOffer(ctx context.Context, id string, offeredBy string, expiresAt time.Time) error {
+	query := `UPDATE games SET draw_offered_by = $1, draw_expires_at = $2, updated_at = now() WHERE id = $3`
+	_, err := r.db.ExecContext(ctx, query, offeredBy, expiresAt, id)
+	return err
+}
+
+func (r *GameRepository) ClearDrawOffer(ctx context.Context, id string) error {
+	query := `UPDATE games SET draw_offered_by = NULL, draw_expires_at = NULL, updated_at = now() WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (r *GameRepository) FinishDraw(ctx context.Context, id string, boardState string, currentTurn string) error {
+	query := `UPDATE games SET board_state = $1, current_turn = $2, status = 'draw', draw_offered_by = NULL, draw_expires_at = NULL, updated_at = now() WHERE id = $3`
+	_, err := r.db.ExecContext(ctx, query, boardState, currentTurn, id)
+	return err
+}
+
+func (r *GameRepository) CloseGame(ctx context.Context, id string) error {
+	query := `UPDATE games SET status = 'closed', draw_offered_by = NULL, draw_expires_at = NULL, updated_at = now() WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id)
 	return err
 }

@@ -62,6 +62,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /games", gameHandler.CreateGame)
 	mux.HandleFunc("POST /games/{id}/join", gameHandler.JoinGame)
+	mux.HandleFunc("GET /games/{id}", gameHandler.GetGame)
+	mux.HandleFunc("POST /games/{id}/close", gameHandler.CloseGame)
 	mux.HandleFunc("GET /ws", wsHandler.HandleConnection)
 
 	log.Println("server starting on :8080")
