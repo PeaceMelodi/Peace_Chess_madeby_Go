@@ -66,6 +66,11 @@ func main() {
 	mux.HandleFunc("POST /games/{id}/close", gameHandler.CloseGame)
 	mux.HandleFunc("GET /ws", wsHandler.HandleConnection)
 
+	// Serve the frontend HTML at root
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "index.html")
+	})
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
