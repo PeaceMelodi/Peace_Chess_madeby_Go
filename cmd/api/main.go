@@ -66,8 +66,12 @@ func main() {
 	mux.HandleFunc("POST /games/{id}/close", gameHandler.CloseGame)
 	mux.HandleFunc("GET /ws", wsHandler.HandleConnection)
 
-	log.Println("server starting on :8080")
-	if err := http.ListenAndServe(":8080", withCORS(mux)); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("server starting on :%s", port)
+	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
