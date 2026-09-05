@@ -66,17 +66,18 @@ func main() {
 	mux.HandleFunc("POST /games/{id}/close", gameHandler.CloseGame)
 	mux.HandleFunc("GET /ws", wsHandler.HandleConnection)
 
-	// Serve the frontend HTML at root
+	// Health check route for Render (DO NOT try to serve a file)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "index.html")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","service":"peacechess"}`))
 	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	log.Printf("server starting on :%s", port)
-	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
+	log.Printf("server starting on 0.0.0.0:%s", port)
+	if err := http.ListenAndServe("0.0.0.0:"+port, withCORS(mux)); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
