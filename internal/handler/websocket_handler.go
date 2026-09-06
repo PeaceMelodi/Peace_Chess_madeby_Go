@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -22,9 +21,10 @@ var upgrader = websocket.Upgrader{
 }
 
 type WebSocketHandler struct {
-	service    *service.GameService
-	hub        *ws.Hub
-	mu         sync.Mutex
+	service *service.GameService
+	hub     *ws.Hub
+	mu      sync.Mutex
+	// Track draw timers per game
 	drawTimers map[string]*time.Timer
 }
 
@@ -93,15 +93,6 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		"seat": seat,
 	})
 
-	// Set a read deadline to detect dead connections.
-	// We'll reset it on every successful read.
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		// Also reset on pong (from browser's protocol-level pong)
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
-
 	defer func() {
 		h.hub.Unregister(gameID, client)
 		h.hub.Broadcast(gameID, map[string]interface{}{
@@ -111,17 +102,9 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 	}()
 
 	for {
-		// Reset read deadline before each read (so any message keeps it alive)
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-
 		var msg incomingMessage
 		if err := conn.ReadJSON(&msg); err != nil {
-			// Check if it's a timeout (connection dead) or a normal close
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				log.Printf("connection timeout for %s in game %s", seat, gameID)
-			} else {
-				log.Printf("player disconnected from game %s (%s): %v", gameID, seat, err)
-			}
+			log.Printf("player disconnected from game %s (%s): %v", gameID, seat, err)
 			return
 		}
 
@@ -136,11 +119,6 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			h.handleDrawDecline(r.Context(), gameID, seat)
 		case "close_game":
 			h.handleCloseGame(r.Context(), gameID, token, seat)
-		case "ping":
-			// Respond to client ping with pong
-			client.Send(map[string]interface{}{
-				"type": "pong",
-			})
 		default:
 			client.Send(map[string]interface{}{
 				"type":    "error",
@@ -192,11 +170,13 @@ func (h *WebSocketHandler) handleDrawOffer(ctx context.Context, gameID string, s
 		return
 	}
 
+	// Broadcast draw offer to both players
 	h.hub.Broadcast(gameID, map[string]interface{}{
 		"type":       "draw_offered",
 		"offered_by": seat,
 	})
 
+	// Start timer for draw expiration
 	h.mu.Lock()
 	if timer, exists := h.drawTimers[gameID]; exists {
 		timer.Stop()
@@ -216,6 +196,7 @@ func (h *WebSocketHandler) handleDrawOffer(ctx context.Context, gameID string, s
 }
 
 func (h *WebSocketHandler) handleDrawAccept(ctx context.Context, gameID string, seat string) {
+	// Stop the draw timer
 	h.mu.Lock()
 	if timer, exists := h.drawTimers[gameID]; exists {
 		timer.Stop()
@@ -244,6 +225,7 @@ func (h *WebSocketHandler) handleDrawAccept(ctx context.Context, gameID string, 
 }
 
 func (h *WebSocketHandler) handleDrawDecline(ctx context.Context, gameID string, seat string) {
+	// Stop the draw timer
 	h.mu.Lock()
 	if timer, exists := h.drawTimers[gameID]; exists {
 		timer.Stop()
@@ -268,6 +250,7 @@ func (h *WebSocketHandler) handleDrawDecline(ctx context.Context, gameID string,
 }
 
 func (h *WebSocketHandler) handleCloseGame(ctx context.Context, gameID string, token string, seat string) {
+	// Stop any pending draw timer
 	h.mu.Lock()
 	if timer, exists := h.drawTimers[gameID]; exists {
 		timer.Stop()
