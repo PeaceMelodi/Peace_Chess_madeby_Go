@@ -79,6 +79,7 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 
 	log.Printf("player connected to game %s as %s", gameID, seat)
 
+	// Send initial game state
 	client.Send(map[string]interface{}{
 		"type":         "game_state",
 		"board_state":  game.BoardState,
@@ -92,29 +93,14 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		"seat": seat,
 	})
 
-	// Set up heartbeat (ping/pong) to keep connection alive
-	// 1. Set read deadline and handle pong from client
+	// Set a read deadline to detect dead connections.
+	// We'll reset it on every successful read.
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
-		// Reset read deadline on any pong from client
+		// Also reset on pong (from browser's protocol-level pong)
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
-
-	// 2. Start a goroutine to send pings every 30 seconds
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-	go func() {
-		for {
-			select {
-			case <-pingTicker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					log.Printf("failed to send ping to %s: %v", seat, err)
-					return
-				}
-			}
-		}
-	}()
 
 	defer func() {
 		h.hub.Unregister(gameID, client)
@@ -125,6 +111,9 @@ func (h *WebSocketHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 	}()
 
 	for {
+		// Reset read deadline before each read (so any message keeps it alive)
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 		var msg incomingMessage
 		if err := conn.ReadJSON(&msg); err != nil {
 			// Check if it's a timeout (connection dead) or a normal close
