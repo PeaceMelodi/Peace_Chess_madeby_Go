@@ -117,7 +117,6 @@ func (s *GameService) MakeMove(ctx context.Context, gameID string, seat string, 
 	}
 	chessGame := chess.NewGame(fen)
 
-	// Original simple move validation
 	if err := chessGame.PushNotationMove(moveUCI, chess.UCINotation{}, nil); err != nil {
 		return nil, errors.New("illegal move")
 	}
@@ -192,6 +191,7 @@ func (s *GameService) AcceptDraw(ctx context.Context, gameID string, seat string
 		return nil, errors.New("cannot accept your own draw offer")
 	}
 	if game.DrawExpiresAt == nil || time.Now().After(*game.DrawExpiresAt) {
+		// Draw offer expired
 		if err := s.repo.ClearDrawOffer(ctx, gameID); err != nil {
 			return nil, err
 		}
@@ -268,6 +268,7 @@ func (s *GameService) CloseGame(ctx context.Context, gameID string, token string
 		return errors.New("game not found")
 	}
 
+	// Verify creator token
 	var creatorToken string
 	if game.CreatorColor == "white" {
 		creatorToken = game.WhiteToken
