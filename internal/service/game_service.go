@@ -117,7 +117,17 @@ func (s *GameService) MakeMove(ctx context.Context, gameID string, seat string, 
 	}
 	chessGame := chess.NewGame(fen)
 
-	if err := chessGame.PushNotationMove(moveUCI, chess.UCINotation{}, nil); err != nil {
+	// Attempt the move
+	err = chessGame.PushNotationMove(moveUCI, chess.UCINotation{}, nil)
+	if err != nil {
+		// If the move is illegal, check if it's because the current player is in check.
+		// The library's ValidMoves() returns only moves that get out of check.
+		// If the number of legal moves is less than the number of pieces on the board,
+		// it strongly suggests the king is in check.
+		validMoves := chessGame.ValidMoves()
+		if len(validMoves) < len(chessGame.Position().Board().SquareMap()) {
+			return nil, errors.New("you are in check")
+		}
 		return nil, errors.New("illegal move")
 	}
 
@@ -191,7 +201,6 @@ func (s *GameService) AcceptDraw(ctx context.Context, gameID string, seat string
 		return nil, errors.New("cannot accept your own draw offer")
 	}
 	if game.DrawExpiresAt == nil || time.Now().After(*game.DrawExpiresAt) {
-		// Draw offer expired
 		if err := s.repo.ClearDrawOffer(ctx, gameID); err != nil {
 			return nil, err
 		}
@@ -268,7 +277,6 @@ func (s *GameService) CloseGame(ctx context.Context, gameID string, token string
 		return errors.New("game not found")
 	}
 
-	// Verify creator token
 	var creatorToken string
 	if game.CreatorColor == "white" {
 		creatorToken = game.WhiteToken
